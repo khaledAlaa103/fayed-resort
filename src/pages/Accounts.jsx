@@ -1,49 +1,64 @@
 import { useMemo, useState } from 'react'
 import BackButton from '../components/BackButton.jsx'
-import { monthMap } from '../data/chalets.js'
 import { exportAccountsToWord } from '../utils/exportDoc.js'
+import { formatArabicNumber, toArabicDigits } from '../utils/numbers.js'
+import ArabicDate from '../components/ArabicDate.jsx'
+import { matchesSearch } from '../utils/search.js'
 
-function loadBookings() {
-  const bookings = []
-  Object.keys(localStorage).forEach((key) => {
-    if (!key.startsWith('book_')) return
-    try {
-      const data = JSON.parse(localStorage.getItem(key))
-      const [, monthPart, day, chaletId] = key.split('_')
-      const monthNumeric = monthMap[monthPart] || monthPart
-      const itemsTotal = data.items ? data.items.reduce((s, i) => s + i.total, 0) : 0
-      const grandTotal = (data.stayPrice || 0) + itemsTotal
-      bookings.push({
-        key,
-        date: `${day}/${monthNumeric}`,
-        chaletId,
-        name: data.name || 'غير مسجل',
-        stayPrice: data.stayPrice || 0,
-        items: data.items || [],
-        total: grandTotal,
-      })
-    } catch {
-      // skip corrupted records
-    }
-  })
-  return bookings
+function formatOrders(items, pred) {
+  const list = (items || []).filter(pred)
+  if (!list.length) return '---'
+  return list.map((item) => `${item.name} (x${toArabicDigits(item.qty || 1)})`).join(' - ')
 }
 
-export default function Accounts({ onBack, refreshKey }) {
-  const [version, setVersion] = useState(0)
-  const bookings = useMemo(() => loadBookings(), [refreshKey, version])
+export default function Accounts({
+  onBack,
+  bookings: bookingRecords = [],
+  meals = [],
+  cafeteria = [],
+  year,
+  readOnly = false,
+  onDeleteBooking,
+}) {
+  const mealNames = useMemo(() => new Set(meals.map((item) => item.name)), [meals])
+  const cafeteriaNames = useMemo(() => new Set(cafeteria.map((item) => item.name)), [cafeteria])
+
+  const [query, setQuery] = useState('')
+
+  const bookings = useMemo(() => bookingRecords.map((data) => {
+    const items = data.items || []
+    const itemsTotal = items.reduce((s, i) => s + i.total, 0)
+    const grandTotal = (data.stayPrice || 0) + itemsTotal
+    return {
+      ...data,
+      stayPrice: data.stayPrice || 0,
+      items,
+      restaurantOrders: formatOrders(items, (item) => (
+        item.source === 'restaurant' || (!item.source && mealNames.has(item.name))
+      )),
+      cafeteriaOrders: formatOrders(items, (item) => (
+        item.source === 'cafeteria' || (!item.source && cafeteriaNames.has(item.name))
+      )),
+      total: grandTotal,
+    }
+  }), [bookingRecords, mealNames, cafeteriaNames])
+
+  const visibleBookings = useMemo(() => bookings.filter((booking) => (
+    matchesSearch(booking.name, query) || matchesSearch(booking.chaletId, query)
+  )), [bookings, query])
+
   const totalAllBookings = bookings.reduce((sum, b) => sum + b.total, 0)
+  const visibleTotal = visibleBookings.reduce((sum, b) => sum + b.total, 0)
 
   const exportWord = () => {
     const area = document.getElementById('exportArea')
     if (area) exportAccountsToWord(area.innerHTML)
   }
 
-  const deleteBooking = (key) => {
+  const deleteBooking = async (booking) => {
     if (!confirm('هل أنت متأكد من حذف هذا الحجز نهائياً؟')) return
-    localStorage.removeItem(key)
-    alert('تم حذف الحجز بنجاح')
-    setVersion((v) => v + 1)
+    await onDeleteBooking(booking)
+    alert('تم حذف الحجز وإرجاع الكميات إلى المخزن')
   }
 
   return (
@@ -60,8 +75,18 @@ export default function Accounts({ onBack, refreshKey }) {
         </div>
         <div className="total-badge">
           <strong>الإجمالي: </strong>
-          <span>{totalAllBookings.toLocaleString()} ج.م</span>
+          <span>{formatArabicNumber(query.trim() ? visibleTotal : totalAllBookings)} ج.م</span>
         </div>
+      </div>
+      <div className="search-field no-print">
+        <label htmlFor="accounts-search">بحث بالاسم أو الشاليه</label>
+        <input
+          id="accounts-search"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="اكتب الاسم أو رقم الشاليه..."
+        />
       </div>
 
       <div id="exportArea" className="data-table-wrap">
@@ -72,39 +97,42 @@ export default function Accounts({ onBack, refreshKey }) {
               <th>الشاليه</th>
               <th>الاسم</th>
               <th>الإقامة</th>
-              <th>الطلبات</th>
+              <th>المطعم</th>
+              <th>الكافتيريا</th>
               <th>الإجمالي</th>
+              {readOnly ? null : (
               <th className="no-print" style={{ textAlign: 'center' }}>حذف</th>
+              )}
             </tr>
           </thead>
           <tbody>
-            {bookings.length === 0 ? (
+            {visibleBookings.length === 0 ? (
               <tr>
-                <td colSpan={7} className="empty-row">لا توجد بيانات</td>
+                <td colSpan={readOnly ? 7 : 8} className="empty-row">{bookings.length === 0 ? 'لا توجد بيانات' : 'لا توجد نتائج مطابقة للبحث'}</td>
               </tr>
             ) : (
-              bookings.map((b) => {
-                const itemsList = b.items.length > 0 ? b.items.map((i) => i.name).join(' - ') : '---'
-                return (
-                  <tr key={b.key}>
-                    <td style={{ fontWeight: 'bold' }}>{b.date}</td>
-                    <td style={{ textAlign: 'center' }}>{b.chaletId}</td>
-                    <td>{b.name}</td>
-                    <td>{b.stayPrice} ج</td>
-                    <td style={{ fontSize: '0.85rem' }}>{itemsList}</td>
-                    <td className="accent-text">{b.total} ج</td>
-                    <td className="no-print" style={{ textAlign: 'center' }}>
-                      <button type="button" className="icon-only" onClick={() => deleteBooking(b.key)}>🗑️</button>
-                    </td>
-                  </tr>
-                )
-              })
+              visibleBookings.map((b) => (
+                <tr key={b.key}>
+                  <td><ArabicDate day={b.day} month={b.month} year={b.year || year} /></td>
+                  <td style={{ textAlign: 'center' }}>{toArabicDigits(b.chaletId)}</td>
+                  <td>{b.name}</td>
+                  <td>{formatArabicNumber(b.stayPrice)} ج</td>
+                  <td>{b.restaurantOrders}</td>
+                  <td>{b.cafeteriaOrders}</td>
+                  <td className="accent-text">{formatArabicNumber(b.total)} ج</td>
+                  {readOnly ? null : (
+                  <td className="no-print" style={{ textAlign: 'center' }}>
+                    <button type="button" className="icon-only" onClick={() => deleteBooking(b)}>🗑️</button>
+                  </td>
+                  )}
+                </tr>
+              ))
             )}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={5} style={{ textAlign: 'left' }}>الإجمالي الكلي:</td>
-              <td colSpan={2} className="danger-text">{totalAllBookings.toLocaleString()} ج.م</td>
+              <td colSpan={readOnly ? 5 : 6} style={{ textAlign: 'left' }}>الإجمالي الكلي:</td>
+              <td colSpan={2} className="danger-text">{formatArabicNumber(query.trim() ? visibleTotal : totalAllBookings)} ج.م</td>
             </tr>
           </tfoot>
         </table>

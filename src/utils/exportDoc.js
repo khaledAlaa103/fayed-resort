@@ -1,3 +1,5 @@
+import { formatArabicNumber } from './numbers.js'
+
 function downloadHtmlAsWord(html, filename, title) {
   const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40' dir='rtl'><head><meta charset='utf-8'><style>table{border-collapse:collapse;width:100%;} th,td{border:1px solid black;padding:5px;text-align:right;} th{background:#2c3e50;color:white;}</style></head><body><h2 style='text-align:center'>${title}</h2>`
   const footer = '</body></html>'
@@ -18,8 +20,6 @@ export function exportInventoryToWord(html) {
 }
 
 export function formatMoney(value, fractionDigits = 0) {
-  return Number(value || 0).toLocaleString(undefined, {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits || 2,
-  })
+  const digits = fractionDigits || 2
+  return formatArabicNumber(value, digits)
 }

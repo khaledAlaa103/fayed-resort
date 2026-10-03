@@ -1,15 +1,22 @@
 import BackButton from '../components/BackButton.jsx'
-import { chaletsData, housingMonths } from '../data/chalets.js'
-import { isChaletBooked } from '../utils/storage.js'
+import { chaletsData, chaletTypeLabel, daysInMonth, housingMonths } from '../data/chalets.js'
+import ArabicDate from '../components/ArabicDate.jsx'
+import { toArabicDigits } from '../utils/dates.js'
 
 export default function Housing({
   month,
   day,
+  year,
+  bookings,
   onBack,
   onSelectMonth,
   onSelectDay,
   onSelectChalet,
 }) {
+  const isBooked = (chaletId) => bookings.some(
+    (item) => item.month === month && Number(item.day) === Number(day) && Number(item.chaletId) === Number(chaletId),
+  )
+
   return (
     <>
       <BackButton onClick={onBack} />
@@ -29,14 +36,14 @@ export default function Housing({
 
       {month ? (
         <div className="days-container">
-          {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+          {Array.from({ length: daysInMonth[month] || 31 }, (_, i) => i + 1).map((d) => (
             <button
               key={d}
               type="button"
               className={day === d ? 'active' : ''}
               onClick={() => onSelectDay(d)}
             >
-              {d}
+              {toArabicDigits(d)}
             </button>
           ))}
         </div>
@@ -44,20 +51,25 @@ export default function Housing({
 
       {month && day ? (
         <>
-          <h3>خريطة شاليهات يوم {day} {month}</h3>
+          <h3>خريطة شاليهات يوم <ArabicDate day={day} month={month} year={year} /></h3>
+          <div className="chalet-legend">
+            <span className="legend-double">سويت زوجي</span>
+            <span className="legend-single">سويت فردي</span>
+          </div>
           <div className="chalet-grid">
             {chaletsData.map((ch) => {
-              const booked = isChaletBooked(month, day, ch.id)
+              const booked = isBooked(ch.id)
               return (
-                <div
+                <button
+                  type="button"
                   key={ch.id}
                   className={`chalet ${ch.type} ${booked ? 'booked' : ''}`}
                   onClick={() => onSelectChalet(ch.id)}
                 >
-                  <strong>{ch.id}</strong>
-                  <br />
+                  <strong>{toArabicDigits(ch.id)}</strong>
+                  <span className="chalet-type">{chaletTypeLabel(ch.type)}</span>
                   <small>{ch.area}</small>
-                </div>
+                </button>
               )
             })}
           </div>

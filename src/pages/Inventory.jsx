@@ -1,14 +1,28 @@
 import { useMemo, useState } from 'react'
 import BackButton from '../components/BackButton.jsx'
 import Modal from '../components/Modal.jsx'
-import { exportInventoryToWord, formatMoney } from '../utils/exportDoc.js'
+import { exportInventoryToWord } from '../utils/exportDoc.js'
+import { consumedQty, roundQty } from '../utils/stock.js'
+import { todayArabicNumeric } from '../utils/dates.js'
+import { formatArabicNumber, numericValue, parseEditableNumber, toArabicDigits } from '../utils/numbers.js'
+import ArabicDate from '../components/ArabicDate.jsx'
+import ArabicNumberInput from '../components/ArabicNumberInput.jsx'
+import { displayUnit, unitOptions } from '../utils/units.js'
+import { matchesSearch } from '../utils/search.js'
 
-export default function Inventory({ items, onChange, onBack }) {
+export default function Inventory({ items, readOnly = false, onChange, onBack }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
+  const [query, setQuery] = useState('')
+
+  const visibleItems = useMemo(() => {
+    return items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => matchesSearch(item.name, query))
+  }, [items, query])
 
   const grandTotal = useMemo(
-    () => items.reduce((sum, item) => sum + ((item.qty * item.price) || 0), 0),
+    () => items.reduce((sum, item) => sum + numericValue(item.total ?? (numericValue(item.qty) * numericValue(item.price))), 0),
     [items],
   )
 
@@ -18,9 +32,14 @@ export default function Inventory({ items, onChange, onBack }) {
         if (i !== index) return item
         const updated = {
           ...item,
-          [field]: field === 'qty' || field === 'price' ? (parseFloat(value) || 0) : value,
+          [field]: field === 'qty' || field === 'price' || field === 'openingQty'
+            ? parseEditableNumber(value, item[field])
+            : value,
         }
-        updated.total = (updated.qty * updated.price) || 0
+        updated.total = numericValue(updated.qty) * numericValue(updated.price)
+        if (field === 'qty' && updated.openingQty == null) {
+          updated.openingQty = updated.qty
+        }
         return updated
       })
       return next
@@ -46,7 +65,7 @@ export default function Inventory({ items, onChange, onBack }) {
     const qty = parseFloat(form.qty) || 0
     const price = parseFloat(form.price) || 0
     onChange((prev) => [
-      { date: form.date, name: form.name, unit: form.unit, qty, price, total: qty * price },
+      { date: form.date, name: form.name, unit: form.unit, qty, price, total: qty * price, openingQty: qty },
       ...prev,
     ])
     setModalOpen(false)
@@ -64,81 +83,135 @@ export default function Inventory({ items, onChange, onBack }) {
         <div className="toolbar-actions no-print">
           <button type="button" className="btn-print" onClick={() => window.print()}>🖨️ طباعة</button>
           <button type="button" className="btn-word" onClick={exportWord}>📄 Word</button>
-          <button type="button" className="add-item-btn" onClick={openAddModal}>+ إضافة صنف جديد</button>
+          {readOnly ? null : (
+            <button type="button" className="add-item-btn" onClick={openAddModal}>+ إضافة صنف جديد</button>
+          )}
         </div>
       </div>
+      <p className="inventory-hint no-print">أول المدة هي كمية بداية الشهر، والمستهلك والمُتبقي يتحدثان تلقائياً عند سحب وجبات النزلاء.</p>
       <div className="no-print">
         <BackButton onClick={onBack} label="← رجوع للقائمة الرئيسية" />
       </div>
+      <div className="search-field no-print">
+        <label htmlFor="inventory-search">بحث باسم الصنف</label>
+        <input
+          id="inventory-search"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="اكتب اسم الصنف..."
+        />
+      </div>
 
       <div id="inventoryPrintArea" className="data-table-wrap">
-        <table className="data-table">
+        <table className="data-table inventory-table">
           <thead>
             <tr>
               <th>التاريخ</th>
-              <th>اسم الصنف</th>
+              <th className="inv-col-lg inv-name-col">اسم الصنف</th>
               <th>الوحدة</th>
-              <th>الكمية</th>
-              <th>السعر</th>
+              <th className="inv-col-lg inv-num-col">أول المدة</th>
+              <th className="inv-col-lg inv-num-col">المستهلك</th>
+              <th className="inv-col-lg inv-num-col">المتبقي</th>
+              <th className="inv-col-lg inv-num-col">السعر</th>
               <th>الإجمالي</th>
-              <th className="no-print">إجراءات</th>
+              {readOnly ? null : <th className="no-print">إجراءات</th>}
             </tr>
           </thead>
           <tbody>
-            {items.map((item, index) => {
-              const itemTotal = (item.qty * item.price) || 0
+            {visibleItems.length === 0 ? (
+              <tr>
+                <td colSpan={readOnly ? 8 : 9} className="empty-row">{items.length === 0 ? 'لا توجد أصناف' : 'لا توجد أصناف مطابقة للبحث'}</td>
+              </tr>
+            ) : visibleItems.map(({ item, index }) => {
+              const remaining = numericValue(item.qty)
+              const opening = numericValue(item.openingQty ?? item.qty)
+              const used = consumedQty({ ...item, openingQty: opening, qty: remaining })
+              const itemTotal = numericValue(item.total ?? remaining * numericValue(item.price))
+              const low = remaining <= 0 || (opening > 0 && remaining / opening <= 0.15)
               return (
-                <tr key={`${item.name}-${index}`}>
+                <tr key={`${item.name}-${index}`} className={low ? 'low-stock-row' : ''}>
                   <td>
-                    <input
-                      className="inv-input"
-                      style={{ width: 90 }}
+                    <ArabicDate
+                      editable={!readOnly}
+                      disabled={readOnly}
                       value={item.date}
-                      onChange={(e) => updateField(index, 'date', e.target.value)}
+                      onChange={(date) => updateField(index, 'date', date)}
                     />
                   </td>
+                  <td className="inv-col-lg inv-name-cell">
+                    <label className="inv-name-wrap">
+                      <span className="inv-name-sizer">{item.name || ' '}</span>
+                      <textarea
+                        className="inv-input inv-name-input"
+                        rows={1}
+                        value={item.name}
+                        disabled={readOnly}
+                        onChange={(e) => updateField(index, 'name', e.target.value)}
+                      />
+                    </label>
+                  </td>
                   <td>
-                    <input
+                    {readOnly ? (
+                      displayUnit(item.unit)
+                    ) : (
+                      <select
+                        className="inv-input"
+                        aria-label="الوحدة"
+                        value={displayUnit(item.unit)}
+                        onChange={(e) => updateField(index, 'unit', e.target.value)}
+                      >
+                        <option value="">الوحدة</option>
+                        {unitOptions(items.map((row) => row.unit), item.unit).map((unit) => (
+                          <option key={unit} value={unit}>{unit}</option>
+                        ))}
+                      </select>
+                    )}
+                  </td>
+                  <td className="inv-col-lg inv-num-col">
+                    <ArabicNumberInput
                       className="inv-input"
-                      style={{ width: '95%', textAlign: 'right' }}
-                      value={item.name}
-                      onChange={(e) => updateField(index, 'name', e.target.value)}
+                      value={item.openingQty ?? item.qty}
+                      disabled={readOnly}
+                      onChange={(value) => updateField(index, 'openingQty', value)}
                     />
                   </td>
-                  <td style={{ textAlign: 'center' }}>{item.unit}</td>
-                  <td>
-                    <input
-                      className="inv-input"
-                      style={{ width: 70 }}
-                      type="number"
+                  <td className={`inv-col-lg inv-num-col ${used > 0 ? 'accent-text' : ''}`}>
+                    {toArabicDigits(roundQty(used))}
+                  </td>
+                  <td className="inv-col-lg inv-num-col">
+                    <ArabicNumberInput
+                      className={`inv-input ${low ? 'low-stock-input' : ''}`}
                       value={item.qty}
-                      onChange={(e) => updateField(index, 'qty', e.target.value)}
+                      disabled={readOnly}
+                      onChange={(value) => updateField(index, 'qty', value)}
                     />
                   </td>
-                  <td>
-                    <input
+                  <td className="inv-col-lg inv-num-col">
+                    <ArabicNumberInput
                       className="inv-input"
-                      style={{ width: 80 }}
-                      type="number"
                       value={item.price}
-                      onChange={(e) => updateField(index, 'price', e.target.value)}
+                      disabled={readOnly}
+                      onChange={(value) => updateField(index, 'price', value)}
                     />
                   </td>
                   <td style={{ fontWeight: 'bold' }}>
-                    {formatMoney(itemTotal, 2)} ج
+                    {formatArabicNumber(itemTotal, 2)} ج
                   </td>
+                  {readOnly ? null : (
                   <td className="no-print" style={{ textAlign: 'center' }}>
                     <button type="button" className="icon-only" onClick={() => deleteItem(index)}>🗑️</button>
                   </td>
+                  )}
                 </tr>
               )
             })}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={5} style={{ textAlign: 'left' }}>إجمالي قيمة المخزن الكلية:</td>
-              <td colSpan={2} className="danger-text">
-                {formatMoney(grandTotal, 2)} ج.م
+              <td colSpan={readOnly ? 6 : 7} style={{ textAlign: 'left' }}>إجمالي المخازن:</td>
+              <td colSpan={2} className="danger-text inv-grand-total">
+                {formatArabicNumber(Math.round(grandTotal), 0)} ج.م
               </td>
             </tr>
           </tfoot>
@@ -160,33 +233,37 @@ export default function Inventory({ items, onChange, onBack }) {
             </div>
             <div>
               <label>التاريخ:</label>
-              <input
+              <ArabicDate
+                editable
                 value={form.date}
-                onChange={(e) => setForm((prev) => ({ ...prev, date: e.target.value }))}
+                onChange={(date) => setForm((prev) => ({ ...prev, date }))}
               />
             </div>
             <div>
               <label>الوحدة:</label>
-              <input
-                placeholder="كجم، كيس..."
+              <select
+                aria-label="الوحدة"
                 value={form.unit}
                 onChange={(e) => setForm((prev) => ({ ...prev, unit: e.target.value }))}
-              />
+              >
+                <option value="">الوحدة</option>
+                {unitOptions(items.map((item) => item.unit)).map((unit) => (
+                  <option key={unit} value={unit}>{unit}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label>الكمية:</label>
-              <input
-                type="number"
+              <ArabicNumberInput
                 value={form.qty}
-                onChange={(e) => setForm((prev) => ({ ...prev, qty: e.target.value }))}
+                onChange={(qty) => setForm((prev) => ({ ...prev, qty }))}
               />
             </div>
             <div>
               <label>سعر الوحدة:</label>
-              <input
-                type="number"
+              <ArabicNumberInput
                 value={form.price}
-                onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))}
+                onChange={(price) => setForm((prev) => ({ ...prev, price }))}
               />
             </div>
           </div>
@@ -205,10 +282,5 @@ export default function Inventory({ items, onChange, onBack }) {
 }
 
 function emptyForm() {
-  const todayArabic = new Date().toLocaleDateString('ar-EG', {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-  })
-  return { name: '', date: todayArabic, unit: '', qty: 1, price: 0 }
+  return { name: '', date: todayArabicNumeric(), unit: '', qty: 1, price: 0 }
 }
