@@ -4,6 +4,7 @@ import { formatIngredientsText, uniqueInventoryNames } from '../utils/stock.js'
 import { formatArabicNumber, toArabicDigits } from '../utils/numbers.js'
 import ArabicNumberInput from '../components/ArabicNumberInput.jsx'
 import { matchesSearch } from '../utils/search.js'
+import { appAlert, appConfirm } from '../utils/dialogs.js'
 import {
   GUEST_TYPES,
   emptyPriceTiers,
@@ -25,7 +26,7 @@ function tiersToForm(item) {
 export default function Menu({ type, items, inventory, readOnly = false, onAdd, onUpdate, onRemove, onBack }) {
   const title = type === 'restaurant' ? 'المطعم' : 'الكافتيريا'
   const isRestaurant = type === 'restaurant'
-  const stockItems = uniqueInventoryNames(inventory)
+  const stockItems = useMemo(() => uniqueInventoryNames(inventory), [inventory])
   const [editingIndex, setEditingIndex] = useState(null)
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
@@ -72,11 +73,11 @@ export default function Menu({ type, items, inventory, readOnly = false, onAdd, 
     const selectedName = stockName || stockItems[0]?.name
     const qty = parseFloat(stockQty)
     if (!selectedName) {
-      alert('لا توجد أصناف في المخزن لربطها')
+      appAlert('لا توجد أصناف في المخزن لربطها')
       return
     }
     if (!qty || qty <= 0) {
-      alert('أدخل كمية المكون المستهلكة من المخزن')
+      appAlert('أدخل كمية المكون المستهلكة من المخزن')
       return
     }
     const unit = stockUnit || displayUnit(stockItems.find((item) => item.name === selectedName)?.unit) || ''
@@ -98,9 +99,9 @@ export default function Menu({ type, items, inventory, readOnly = false, onAdd, 
     setIngredients((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name) {
-      alert('أكمل اسم الصنف والسعر')
+      appAlert('أكمل اسم الصنف والسعر')
       return
     }
 
@@ -115,7 +116,7 @@ export default function Menu({ type, items, inventory, readOnly = false, onAdd, 
       for (const guest of GUEST_TYPES) {
         const value = Number(priceTiers[guest.id])
         if (!Number.isFinite(value) || value < 0) {
-          alert('أكمل أسعار كل الأنواع')
+          appAlert('أكمل أسعار كل الأنواع')
           return
         }
         tiers[guest.id] = value
@@ -125,14 +126,15 @@ export default function Menu({ type, items, inventory, readOnly = false, onAdd, 
     } else {
       const value = Number(price)
       if (!Number.isFinite(value) || value < 0) {
-        alert('أكمل اسم الصنف والسعر')
+        appAlert('أكمل اسم الصنف والسعر')
         return
       }
       payload = { ...payload, price: value }
     }
 
     if (ingredients.length === 0) {
-      if (!confirm('الصنف غير مربوط بمكونات المخزن، لذلك لن يُخصم شيء عند طلب العميل. هل تريد الحفظ؟')) {
+      const confirmed = await appConfirm('الصنف غير مربوط بمكونات المخزن، لذلك لن يُخصم شيء عند طلب العميل. هل تريد الحفظ؟')
+      if (!confirmed) {
         return
       }
     }
@@ -162,8 +164,9 @@ export default function Menu({ type, items, inventory, readOnly = false, onAdd, 
     }, 50)
   }
 
-  const handleRemove = (index) => {
-    if (confirm('حذف الصنف؟')) {
+  const handleRemove = async (index) => {
+    const confirmed = await appConfirm('حذف الصنف؟')
+    if (confirmed) {
       onRemove(index)
       if (editingIndex === index) resetForm()
     }

@@ -7,9 +7,20 @@ import Booking from './pages/Booking.jsx'
 import Menu from './pages/Menu.jsx'
 import Inventory from './pages/Inventory.jsx'
 import Accounts from './pages/Accounts.jsx'
+import AppDialog from './components/AppDialog.jsx'
 import { api } from './api.js'
 import { applyStockChange } from './utils/stock.js'
 import { toArabicDigits } from './utils/numbers.js'
+import { appAlert } from './utils/dialogs.js'
+
+function PageSlot({ active, opened, children }) {
+  if (!active && !opened) return null
+  return (
+    <div className="page-slot" hidden={!active} {...(!active ? { inert: '' } : {})}>
+      {children}
+    </div>
+  )
+}
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(() => sessionStorage.getItem('isLoggedIn') === 'true')
@@ -30,6 +41,7 @@ export default function App() {
   })
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
+  const [opened, setOpened] = useState({ home: true })
 
   const readOnly = Boolean(yearInfo.readOnly)
   const viewingYear = yearInfo.viewingYear
@@ -54,8 +66,11 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!loggedIn) return undefined
     let cancelled = false
     async function load() {
+      setError('')
+      setReady(false)
       try {
         await loadAll()
         if (!cancelled) setReady(true)
@@ -65,40 +80,40 @@ export default function App() {
     }
     load()
     return () => { cancelled = true }
-  }, [])
+  }, [loggedIn])
 
   const persistMeals = (updater) => {
     if (readOnly) {
-      alert('لا يمكن التعديل على سنة مؤرشفة')
+      appAlert('لا يمكن التعديل على سنة مؤرشفة')
       return
     }
     setMeals((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      api.saveMeals(next).catch((err) => alert(err.message))
+      api.saveMeals(next).catch((err) => appAlert(err.message))
       return next
     })
   }
 
   const persistCafeteria = (updater) => {
     if (readOnly) {
-      alert('لا يمكن التعديل على سنة مؤرشفة')
+      appAlert('لا يمكن التعديل على سنة مؤرشفة')
       return
     }
     setCafeteria((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      api.saveCafeteria(next).catch((err) => alert(err.message))
+      api.saveCafeteria(next).catch((err) => appAlert(err.message))
       return next
     })
   }
 
   const updateInventory = (updater) => {
     if (readOnly) {
-      alert('لا يمكن التعديل على سنة مؤرشفة')
+      appAlert('لا يمكن التعديل على سنة مؤرشفة')
       return
     }
     setInventory((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      api.saveInventory(next).catch((err) => alert(err.message))
+      api.saveInventory(next).catch((err) => appAlert(err.message))
       return next
     })
   }
@@ -123,7 +138,12 @@ export default function App() {
     setBookings((prev) => prev.filter((item) => item.key !== target.key))
   }
 
+  const openSection = (id) => {
+    setOpened((prev) => (prev[id] ? prev : { ...prev, [id]: true }))
+  }
+
   const goHome = () => {
+    openSection('home')
     setSection('home')
     setMonth(null)
     setDay(null)
@@ -131,6 +151,7 @@ export default function App() {
   }
 
   const handleNavigate = (nextSection) => {
+    openSection(nextSection)
     setSection(nextSection)
     setChaletId(null)
     if (nextSection !== 'housing') {
@@ -157,7 +178,7 @@ export default function App() {
       applyData(mealsData, cafeteriaData, inventoryData, bookingsData, info)
       goHome()
     } catch (err) {
-      alert(err.message || 'تعذر فتح بيانات هذه السنة')
+      appAlert(err.message || 'تعذر فتح بيانات هذه السنة')
     }
   }
 
@@ -204,9 +225,11 @@ export default function App() {
           </div>
         ) : null}
 
-        {section === 'home' ? <Home /> : null}
+        <PageSlot active={section === 'home'} opened={opened.home}>
+          <Home />
+        </PageSlot>
 
-        {section === 'housing' && !chaletId ? (
+        <PageSlot active={section === 'housing' && !chaletId} opened={section === 'housing' && !chaletId}>
           <Housing
             month={month}
             day={day}
@@ -220,7 +243,7 @@ export default function App() {
             onSelectDay={setDay}
             onSelectChalet={setChaletId}
           />
-        ) : null}
+        </PageSlot>
 
         {section === 'housing' && chaletId ? (
           <Booking
@@ -241,7 +264,7 @@ export default function App() {
           />
         ) : null}
 
-        {section === 'restaurant' ? (
+        <PageSlot active={section === 'restaurant'} opened={opened.restaurant}>
           <Menu
             type="restaurant"
             items={meals}
@@ -252,9 +275,9 @@ export default function App() {
             onRemove={(index) => persistMeals((prev) => prev.filter((_, i) => i !== index))}
             onBack={goHome}
           />
-        ) : null}
+        </PageSlot>
 
-        {section === 'cafeteria' ? (
+        <PageSlot active={section === 'cafeteria'} opened={opened.cafeteria}>
           <Menu
             type="cafeteria"
             items={cafeteria}
@@ -265,13 +288,13 @@ export default function App() {
             onRemove={(index) => persistCafeteria((prev) => prev.filter((_, i) => i !== index))}
             onBack={goHome}
           />
-        ) : null}
+        </PageSlot>
 
-        {section === 'inventory' ? (
+        <PageSlot active={section === 'inventory'} opened={opened.inventory}>
           <Inventory items={inventory} readOnly={readOnly} onChange={updateInventory} onBack={goHome} />
-        ) : null}
+        </PageSlot>
 
-        {section === 'accounts' ? (
+        <PageSlot active={section === 'accounts'} opened={opened.accounts}>
           <Accounts
             bookings={bookings}
             meals={meals}
@@ -286,8 +309,9 @@ export default function App() {
               await deleteBookingRecord(booking)
             }}
           />
-        ) : null}
+        </PageSlot>
       </main>
+      <AppDialog />
     </div>
   )
 }

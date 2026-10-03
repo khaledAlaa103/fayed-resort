@@ -21,6 +21,9 @@ export const api = {
   saveCafeteria: (items) => request('/api/cafeteria', { method: 'PUT', body: JSON.stringify(items) }),
   getInventory: () => request('/api/inventory'),
   saveInventory: (items) => request('/api/inventory', { method: 'PUT', body: JSON.stringify(items) }),
+  getBooking: (month, day, chaletId) => request(
+    `/api/bookings/${encodeURIComponent(month)}/${day}/${chaletId}`,
+  ),
   getBookings: () => request('/api/bookings'),
   saveBooking: (month, day, chaletId, data) => request(
     `/api/bookings/${encodeURIComponent(month)}/${day}/${chaletId}`,

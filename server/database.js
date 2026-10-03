@@ -149,6 +149,7 @@ function addColumnIfMissing(table, column, type) {
 
 function ensureMealPriceTiers() {
   const rows = all('SELECT id, name, price, price_tiers FROM meals')
+  let changed = false
   for (const row of rows) {
     const existing = parseJson(row.price_tiers, null) || {}
     const def = defaultMeals.find((item) => item.name === row.name)
@@ -168,12 +169,14 @@ function ensureMealPriceTiers() {
       && Number(existing.civilian) === clean.civilian
     if (same) continue
     run('UPDATE meals SET price_tiers = ? WHERE id = ?', [JSON.stringify(clean), row.id])
+    changed = true
   }
+  return changed
 }
 
 function seedIfEmpty() {
   const userCount = all('SELECT COUNT(*) AS count FROM users')[0]?.count || 0
-  if (userCount > 0) return
+  if (userCount > 0) return false
 
   run('INSERT INTO users (username, password) VALUES (?, ?)', ['admin', 'fayed'])
 
@@ -197,6 +200,7 @@ function seedIfEmpty() {
       [item.date, item.name, item.unit, item.qty, item.price, item.total, item.openingQty ?? item.qty],
     )
   }
+  return true
 }
 
 function loadDatabaseFromFile(filePath, { live }) {
@@ -209,11 +213,9 @@ function loadDatabaseFromFile(filePath, { live }) {
     db = new SQL.Database()
   }
   createTables()
-  if (live) {
-    seedIfEmpty()
-  }
-  ensureMealPriceTiers()
-  if (live) persistTo(DB_PATH)
+  const seeded = live ? seedIfEmpty() : false
+  const tiersChanged = ensureMealPriceTiers()
+  if (live && (seeded || tiersChanged)) persistTo(DB_PATH)
 }
 
 function listArchiveYears() {
@@ -411,7 +413,7 @@ function mapInventoryRow(row) {
   }
 }
 
-function mapBookingRow(row) {
+function mapBookingRow(row, { includeImage = true } = {}) {
   return {
     id: row.id,
     month: row.month,
@@ -422,7 +424,8 @@ function mapBookingRow(row) {
     rank: row.rank || '',
     stayPrice: row.stay_price || 0,
     items: parseJson(row.items, []),
-    idCardImage: row.id_card_image || '',
+    idCardImage: includeImage ? (row.id_card_image || '') : '',
+    hasIdCard: Boolean(row.has_id_card || row.id_card_image),
     stockDeductions: parseJson(row.stock_deductions, []),
     key: `book_${row.month}_${row.day}_${row.chalet_id}`,
   }
@@ -441,7 +444,12 @@ export function getInventory() {
 }
 
 export function getBookings() {
-  return all('SELECT * FROM bookings ORDER BY id').map(mapBookingRow)
+  return all(`
+    SELECT id, month, day, chalet_id, name, u_type, rank, stay_price, items, stock_deductions,
+      CASE WHEN id_card_image IS NOT NULL AND length(id_card_image) > 0 THEN 1 ELSE 0 END AS has_id_card
+    FROM bookings
+    ORDER BY id
+  `).map((row) => mapBookingRow(row, { includeImage: false }))
 }
 
 export function getBooking(month, day, chaletId) {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import BackButton from '../components/BackButton.jsx'
 import { compressImage } from '../utils/image.js'
 import { applyStockChange, buildDeductions } from '../utils/stock.js'
@@ -13,6 +13,8 @@ import {
 } from '../utils/guestPrices.js'
 import { stayPriceFor } from '../utils/stayPrices.js'
 import { chaletsData, chaletTypeLabel } from '../data/chalets.js'
+import { api } from '../api.js'
+import { appAlert, appConfirm } from '../utils/dialogs.js'
 
 export default function Booking({
   month,
@@ -43,6 +45,15 @@ export default function Booking({
   const [itemValue, setItemValue] = useState('r:0')
   const [itemQty, setItemQty] = useState(1)
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!existingBooking?.hasIdCard || existingBooking.idCardImage) return undefined
+    let cancelled = false
+    api.getBooking(month, day, chaletId).then((full) => {
+      if (!cancelled && full?.idCardImage) setIdCardImage(full.idCardImage)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [existingBooking, month, day, chaletId])
 
   const itemsTotal = selectedItems.reduce((sum, item) => sum + item.total, 0)
   const grandTotal = (parseFloat(stayPrice) || 0) + itemsTotal
@@ -140,24 +151,25 @@ export default function Booking({
           `${row.name}: المطلوب ${toArabicDigits(row.needed)} والمتوفر كان ${toArabicDigits(row.available)}`
         )).join('\n'))
       }
-      alert(messages.join('\n'))
+      await appAlert(messages.join('\n'))
       onBack()
     } catch (err) {
-      alert(err.message || 'حدث خطأ أثناء حفظ الحجز')
+      await appAlert(err.message || 'حدث خطأ أثناء حفظ الحجز')
     } finally {
       setSaving(false)
     }
   }
 
   const handleCancelBooking = async () => {
-    if (!confirm('هل أنت متأكد من إلغاء الحجز تماماً؟')) return
+    const confirmed = await appConfirm('هل أنت متأكد من إلغاء الحجز تماماً؟')
+    if (!confirmed) return
     const previous = existingBooking
     if (previous?.stockDeductions?.length) {
       const restored = applyStockChange(inventory, previous.stockDeductions, 1).inventory
       onInventoryChange(restored)
     }
     await onDeleteBooking()
-    alert('تم إلغاء الحجز وإرجاع الكميات إلى المخزن')
+    await appAlert('تم إلغاء الحجز وإرجاع الكميات إلى المخزن')
     onBack()
   }
 
@@ -186,12 +198,24 @@ export default function Booking({
             {showRank ? (
               <div className="rank-field">
                 <label>الرتبة:</label>
-                <input type="text" value={rank} onChange={(e) => setRank(e.target.value)} disabled={readOnly} />
+                <input
+                  type="text"
+                  value={rank}
+                  onChange={(e) => setRank(e.target.value)}
+                  disabled={readOnly}
+                  autoComplete="off"
+                />
               </div>
             ) : null}
 
             <label>الاسم:</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} disabled={readOnly} />
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={readOnly}
+              autoComplete="off"
+            />
 
             <label>سعر الإقامة:</label>
             <ArabicNumberInput

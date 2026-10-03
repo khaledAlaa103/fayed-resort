@@ -5,6 +5,9 @@ const path = require('path')
 
 app.setAppUserModelId('com.fayed.resort')
 
+let mainWindow
+let httpServer
+
 if (os.release().startsWith('6.1')) {
   app.disableHardwareAcceleration()
 }
@@ -94,16 +97,21 @@ async function createWindow() {
     icon: iconPath(),
     autoHideMenuBar: true,
     backgroundColor: '#0b3b3c',
-    show: false,
+    show: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      backgroundThrottling: false,
     },
   })
 
   Menu.setApplicationMenu(null)
-  mainWindow.once('ready-to-show', () => mainWindow.show())
+  mainWindow.on('focus', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.focus()
+    }
+  })
   mainWindow.on('closed', () => {
     mainWindow = null
   })

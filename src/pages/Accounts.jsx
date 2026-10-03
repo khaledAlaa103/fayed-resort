@@ -4,6 +4,7 @@ import { exportAccountsToWord } from '../utils/exportDoc.js'
 import { formatArabicNumber, toArabicDigits } from '../utils/numbers.js'
 import ArabicDate from '../components/ArabicDate.jsx'
 import { matchesSearch } from '../utils/search.js'
+import { appAlert, appConfirm } from '../utils/dialogs.js'
 
 function formatOrders(items, pred) {
   const list = (items || []).filter(pred)
@@ -56,9 +57,10 @@ export default function Accounts({
   }
 
   const deleteBooking = async (booking) => {
-    if (!confirm('هل أنت متأكد من حذف هذا الحجز نهائياً؟')) return
+    const confirmed = await appConfirm('هل أنت متأكد من حذف هذا الحجز نهائياً؟')
+    if (!confirmed) return
     await onDeleteBooking(booking)
-    alert('تم حذف الحجز وإرجاع الكميات إلى المخزن')
+    await appAlert('تم حذف الحجز وإرجاع الكميات إلى المخزن')
   }
 
   return (

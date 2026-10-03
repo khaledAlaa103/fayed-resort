@@ -23,6 +23,8 @@ const MIME = {
   '.woff2': 'font/woff2',
 }
 
+const fileCache = new Map()
+
 function safeFile(staticDir, urlPath) {
   const decoded = decodeURIComponent((urlPath || '/').split('?')[0] || '/')
   const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '')
@@ -34,9 +36,17 @@ function safeFile(staticDir, urlPath) {
 
 function sendFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase()
+  let body = fileCache.get(filePath)
+  if (!body) {
+    body = fs.readFileSync(filePath)
+    fileCache.set(filePath, body)
+  }
   res.statusCode = 200
   res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream')
-  fs.createReadStream(filePath).pipe(res)
+  if (ext !== '.html') {
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+  }
+  res.end(body)
 }
 
 function serveStatic(req, res, staticDir) {
@@ -56,12 +66,16 @@ function serveStatic(req, res, staticDir) {
   res.end('Not found')
 }
 
-export function startDesktopServer({ staticDir, host = '127.0.0.1', port = 0 }) {
+export async function startDesktopServer({ staticDir, host = '127.0.0.1', port = 0 }) {
+  await getDb()
   return new Promise((resolve, reject) => {
     const server = http.createServer(async (req, res) => {
       try {
-        await getDb()
-        if (await handleApiRequest(req, res)) return
+        const url = (req.url || '/').split('?')[0] || '/'
+        if (url.startsWith('/api')) {
+          await getDb()
+          if (await handleApiRequest(req, res)) return
+        }
         serveStatic(req, res, staticDir)
       } catch (error) {
         console.error('[desktop]', error)
